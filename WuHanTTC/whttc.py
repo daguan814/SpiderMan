@@ -85,15 +85,16 @@ def shuake(start, end):
 if qi == 1:
     # 更新为新的课程ID范围
     shuake(917, 967)  # 假设新课程范围，可以根据实际情况调整
-    print('刷完2期')
+    print('刷完1期')
 
 if qi == 2:
-    shuake(1918, 1976)
-    print('刷完1期')
+    shuake(1918, 1952)
+    shuake(1961, 1976)
+    print('刷完2期')
 
 if qi == 3:
     shuake(917, 967)  # 更新为新课程范围
     print('刷完1期')
-    shuake(1918, 1976)
+    shuake(1918, 1952)
+    shuake(1961, 1976)
     print('刷完2期')
-    print('全部刷完')
