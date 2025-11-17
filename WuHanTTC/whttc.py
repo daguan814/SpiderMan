@@ -8,25 +8,13 @@ import time
 import requests
 
 qi = int(input('请输入您需要刷的期数,3=全部:'))
-# 输入完整 cookie 字符串
-cookie_str = input('请输入您的cookie,需要复制全部cookie:\n')
+cookie = str(input('请输入您的cookie,仅需要:SavedLogin:'))
 
-# 把 cookie 字符串转成字典
-cookies = {}
-for item in cookie_str.split(';'):
-    if '=' in item:
-        k, v = item.strip().split('=', 1)
-        cookies[k] = v
-
-# 修改或新增字段
-cookies['MaxTimeLength_932'] = '12332'
-cookies['TheMaxTime'] = '12332'
-cookies['MaxTimeLength_967'] = '12332'
-cookies['MaxTimeLength_917'] = '12332'
-cookies['MaxTimeLength_1976'] = '12332'
-cookies['MaxTimeLength_1918'] = '12332'
-
-print(cookies)
+# 从curl命令中提取的更新后的请求头
+cookies = {'MaxTimeLength_932': '0', 'TheMaxTime': '0', 'MaxTimeLength_967': '0', 'MaxTimeLength_917': '0',
+           'MaxTimeLength_1976': '0',
+           'LocalStudyProgress_1918': 'D00BGwQWVmVTTVlIRzxdRUBHESYRUFNRRWZWTUtIRytbXVdHAA4YAktJRWhSQl9XXGoKAwIHQxI%3D',
+           'MaxTimeLength_1918': '0', 'ASP.NET_SessionId': 'w3nv1w3r3tuoiyaz4eubsctc', 'SavedLogin': cookie}
 
 headers = {
     'Content-Type': 'application/x-www-form-urlencoded',
@@ -56,45 +44,27 @@ def shuake(start, end):
     for i in range(start, end + 1):
         params = {
             'xl': '1',
-            'id': i,
+            'id': start,
         }
-        attempt = 0  # 尝试次数
-        while attempt < 5:  # 最多尝试5次
-            attempt += 1
-            try:
-                response = requests.post('http://nsstudy.whttc.com/kj/ViewPlay.aspx', params=params, cookies=cookies,
-                                         headers=headers, data=data)
-                # 检查是否是运行时错误
-                if "运行时错误" in response.text:
-                    print(f"第{i}期：出现运行时错误，重试第{attempt}次...")
-                    time.sleep(2)  # 等待 2 秒后重试
-                    continue  # 继续重试
-                else:
-                    print(i, response.text)  # 打印成功返回的内容
-                    break  # 成功则退出重试
-            except requests.RequestException as e:
-                print(f"第{i}期：请求出错，错误信息：{e}，重试第{attempt}次...")
-                time.sleep(2)  # 请求异常时，等待 2 秒后重试
-
-        if attempt == 5:
-            print(f"第{i}期：尝试了5次，仍然出现错误，跳过此期。")
-
-        time.sleep(2)  # 请求之间稍作延时
+        response = requests.post('http://nsstudy.whttc.com/kj/ViewPlay.aspx', params=params, cookies=cookies,
+                                 headers=headers,
+                                 data=data)
+        print(response.text)
+        time.sleep(1.5)
 
 
 if qi == 1:
     # 更新为新的课程ID范围
     shuake(917, 967)  # 假设新课程范围，可以根据实际情况调整
-    print('刷完1期')
+    print('刷完2期')
 
 if qi == 2:
-    shuake(1918, 1952)
-    shuake(1961, 1976)
-    print('刷完2期')
+    shuake(1918, 1976)
+    print('刷完1期')
 
 if qi == 3:
-    shuake(917, 967)  # 更新为新课程范围
+    shuake(1918, 1976)
     print('刷完1期')
-    shuake(1918, 1952)
-    shuake(1961, 1976)
+    shuake(917, 967)  # 更新为新课程范围
     print('刷完2期')
+    print('全部刷完')
