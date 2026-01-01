@@ -1,3 +1,10 @@
+"""
+Created on 2025/12/31
+Author: Shuijing
+Description:  缺少多少天的，就会更新多少天的。几天不更新，运行一次，一次更新所有的数据
+"""
+
+
 import sqlite3
 import tushare as ts
 import pandas as pd
