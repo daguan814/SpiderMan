@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 import time
 
 import requests
@@ -6,20 +7,7 @@ import requests
 # ========================
 # 参数区（经常修改）
 # ========================
-# token：登录后从请求头里抓到的 token，失效后更新
-token = "59420fb74b79d1a449e01d374c757836"
-
-# exam_id：考试实例 id（通常来自 start_exam 返回）
-exam_id = 203572
-
-# 考试套题：编号 -> (question_id, right_answer, error_answer)
-# 运行考试时输入编号，自动选中对应套题
-exam_sets = {
-    1: (452, 3, 4),
-    2: (436, 2, 3),
-    3: (444, 1, 2),
-    4: (451, 3, 4),
-}
+CONFIG_PATH = Path(__file__).with_name("config.json")
 
 # ========================
 # 参数区（不常修改）
@@ -36,6 +24,145 @@ study_interval_seconds = 1
 # 考试参数
 right_count = 35
 error_count = 15
+auto_submit_wait_seconds = 10 * 60
+
+
+def load_config() -> dict:
+    """读取配置文件。"""
+    if not CONFIG_PATH.exists():
+        raise ValueError("config.json 不存在。")
+
+    try:
+        config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("config.json 格式错误。") from exc
+    except OSError as exc:
+        raise ValueError(f"读取 config.json 失败：{exc}") from exc
+
+    if not isinstance(config, dict):
+        raise ValueError("config.json 内容必须是对象。")
+
+    return config
+
+
+def save_config(config: dict) -> None:
+    """保存配置文件。"""
+    CONFIG_PATH.write_text(
+        json.dumps(config, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def resolve_token(config: dict) -> str:
+    """启动时提示输入 token；未输入时使用配置中的 token。"""
+    current_token = str(config.get("token", "")).strip()
+    raw = input("请输入 token（直接回车则使用 config.json 中的 token）：").strip()
+    if raw:
+        config["token"] = raw
+        save_config(config)
+        return raw
+
+    if current_token:
+        print("未输入 token，使用 config.json 中的 token。")
+        return current_token
+
+    raise ValueError("config.json 中没有可用 token，请先输入 token。")
+
+
+def resolve_exam_id(config: dict) -> int:
+    """考试时提示输入试卷 id；未输入时使用配置中的 id。"""
+    current_exam_id = config.get("exam_id")
+    raw = input("请输入试卷 id（直接回车则使用 config.json 中的 exam_id）：").strip()
+
+    if raw:
+        try:
+            exam_id = int(raw)
+        except ValueError as exc:
+            raise ValueError("试卷 id 必须是整数") from exc
+        config["exam_id"] = exam_id
+        save_config(config)
+        return exam_id
+
+    try:
+        exam_id = int(current_exam_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("config.json 中没有有效的 exam_id，请先输入试卷 id。") from exc
+
+    print(f"未输入试卷 id，使用 config.json 中的 exam_id={exam_id}。")
+    return exam_id
+
+
+def normalize_exam_sets(raw_exam_sets: dict) -> dict[int, tuple[int, int, int]]:
+    """将配置中的 exam_sets 规范化为 int -> tuple[int, int, int]。"""
+    normalized_exam_sets = {}
+
+    if not isinstance(raw_exam_sets, dict):
+        raise ValueError("config.json 中的 exam_sets 必须是对象。")
+
+    for raw_key, raw_value in raw_exam_sets.items():
+        try:
+            set_index = int(raw_key)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"exam_sets 的编号无效：{raw_key}") from exc
+
+        if not isinstance(raw_value, list) or len(raw_value) != 3:
+            raise ValueError(
+                f"exam_sets[{raw_key}] 必须是长度为 3 的数组：[question_id, right_answer, error_answer]"
+            )
+
+        try:
+            question_id, right_answer, error_answer = (int(item) for item in raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"exam_sets[{raw_key}] 中的值必须都是整数") from exc
+
+        normalized_exam_sets[set_index] = (
+            question_id,
+            right_answer,
+            error_answer,
+        )
+
+    if not normalized_exam_sets:
+        raise ValueError("config.json 中的 exam_sets 不能为空。")
+
+    return normalized_exam_sets
+
+
+def resolve_exam_set_index(config: dict, exam_sets: dict[int, tuple[int, int, int]]) -> int:
+    """考试时提示输入套题编号；未输入时使用配置中的编号。"""
+    current_exam_set_index = config.get("exam_set_index")
+    print("可选套题：")
+    for idx, (qid, right, error) in exam_sets.items():
+        print(f"{idx}) 题目ID={qid} 正确答案={right} 错误答案={error}")
+
+    raw = input(
+        "请输入套题编号（直接回车则使用 config.json 中的 exam_set_index）："
+    ).strip()
+
+    if raw:
+        try:
+            exam_set_index = int(raw)
+        except ValueError as exc:
+            raise ValueError("套题编号必须是整数") from exc
+        if exam_set_index not in exam_sets:
+            raise ValueError("套题编号无效")
+        config["exam_set_index"] = exam_set_index
+        save_config(config)
+        return exam_set_index
+
+    try:
+        exam_set_index = int(current_exam_set_index)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "config.json 中没有有效的 exam_set_index，请先输入套题编号。"
+        ) from exc
+
+    if exam_set_index not in exam_sets:
+        raise ValueError("config.json 中的 exam_set_index 不存在于 exam_sets。")
+
+    print(
+        f"未输入套题编号，使用 config.json 中的 exam_set_index={exam_set_index}。"
+    )
+    return exam_set_index
 
 
 def build_common_headers(user_token: str) -> dict:
@@ -53,10 +180,10 @@ def build_common_headers(user_token: str) -> dict:
     }
 
 
-def study_video() -> None:
+def study_video(user_token: str) -> None:
     """刷课流程：按 detail_id 区间逐条提交。"""
     url = "https://api.hubei21.com/api/video_detail_study"
-    headers = build_common_headers(token)
+    headers = build_common_headers(user_token)
     print(f"开始刷课：detail_id {start_detail_id} -> {end_detail_id}")
 
     for detail_id in range(start_detail_id, end_detail_id + 1):
@@ -69,7 +196,9 @@ def study_video() -> None:
         }
         try:
             resp = requests.post(url, json=payload, headers=headers, timeout=30)
-            print(f"[刷课] detail_id={detail_id} 状态码={resp.status_code} 返回={resp.text}")
+            print(
+                f"[刷课] detail_id={detail_id} 状态码={resp.status_code} 返回={resp.text}"
+            )
         except Exception as exc:
             print(f"[刷课] detail_id={detail_id} 异常={exc}")
         time.sleep(study_interval_seconds)
@@ -91,23 +220,6 @@ def build_exam_content_answer(
     return content_answer
 
 
-def choose_exam_set_index() -> int:
-    """选择套题编号。"""
-    print("可选套题：")
-    for idx, (qid, right, error) in exam_sets.items():
-        print(f"{idx}) 题目ID={qid} 正确答案={right} 错误答案={error}")
-
-    raw = input("请输入套题编号：").strip()
-    try:
-        choice = int(raw)
-    except ValueError as exc:
-        raise ValueError("套题编号必须是整数") from exc
-
-    if choice not in exam_sets:
-        raise ValueError("套题编号无效")
-    return choice
-
-
 def print_exam_result(resp: requests.Response) -> None:
     """格式化打印考试结果，有证书链接时单独展示。"""
     print(f"[考试] 状态码={resp.status_code}")
@@ -127,7 +239,9 @@ def print_exam_result(resp: requests.Response) -> None:
     if data:
         print(f"分数: {data.get('score')}")
         print(f"正确率: {data.get('right_accuracy')}")
-        print(f"正确题数: {data.get('right_number')}    错误题数: {data.get('wrong_number')}")
+        print(
+            f"正确题数: {data.get('right_number')}    错误题数: {data.get('wrong_number')}"
+        )
         print(f"用时(秒): {data.get('used_time')}    是否通过: {data.get('pass')}")
 
         certificate_url = data.get("certificate_url")
@@ -141,9 +255,16 @@ def print_exam_result(resp: requests.Response) -> None:
     print("================================")
 
 
-def submit_exam_once(set_index: int, headers: dict) -> requests.Response:
+def submit_exam_once(
+    set_index: int,
+    exam_id: int,
+    exam_sets: dict[int, tuple[int, int, int]],
+    headers: dict,
+) -> requests.Response:
     """按指定套题提交一次考试。"""
-    selected_question_id, selected_right_answer, selected_error_answer = exam_sets[set_index]
+    selected_question_id, selected_right_answer, selected_error_answer = exam_sets[
+        set_index
+    ]
     content_answer = build_exam_content_answer(
         question_id=selected_question_id,
         right_answer=selected_right_answer,
@@ -169,7 +290,9 @@ def submit_exam_once(set_index: int, headers: dict) -> requests.Response:
     )
 
 
-def choose_next_set_after_400(last_set_index: int) -> int:
+def choose_next_set_after_400(
+    last_set_index: int, exam_sets: dict[int, tuple[int, int, int]]
+) -> int:
     """处理 400 后的用户输入：0=重试上次套题，1+ 切换对应套题。"""
     while True:
         raw = input("返回 400：输入 0 重发上次套题，输入 1+ 使用对应套题：").strip()
@@ -186,16 +309,23 @@ def choose_next_set_after_400(last_set_index: int) -> int:
         print("套题编号不存在，请重新输入。")
 
 
-def submit_exam() -> None:
+def submit_exam(
+    user_token: str,
+    exam_id: int,
+    exam_set_index: int,
+    exam_sets: dict[int, tuple[int, int, int]],
+) -> None:
     """考试流程：首次选择套题；若返回 400，则按输入重试或切换套题。"""
-    headers = build_common_headers(token)
+    headers = build_common_headers(user_token)
     headers["Accept"] = "application/json"
 
-    current_set_index = choose_exam_set_index()
+    current_set_index = exam_set_index
+    print(f"已选择试卷 id={exam_id}，将在 10 分钟后自动提交。")
+    time.sleep(auto_submit_wait_seconds)
 
     while True:
         try:
-            resp = submit_exam_once(current_set_index, headers)
+            resp = submit_exam_once(current_set_index, exam_id, exam_sets, headers)
         except Exception as exc:
             print(f"[考试] 请求异常={exc}")
             return
@@ -205,20 +335,34 @@ def submit_exam() -> None:
         if resp.status_code != 400:
             return
 
-        current_set_index = choose_next_set_after_400(current_set_index)
+        current_set_index = choose_next_set_after_400(current_set_index, exam_sets)
 
 
 def main() -> None:
     """程序入口。"""
+    try:
+        config = load_config()
+        user_token = resolve_token(config)
+        exam_sets = normalize_exam_sets(config.get("exam_sets"))
+    except ValueError as exc:
+        print(exc)
+        return
+
     print("请选择操作：")
     print("1) 刷课")
     print("2) 考试")
     choice = input("请输入 1 或 2：").strip()
 
     if choice == "1":
-        study_video()
+        study_video(user_token)
     elif choice == "2":
-        submit_exam()
+        try:
+            exam_id = resolve_exam_id(config)
+            exam_set_index = resolve_exam_set_index(config, exam_sets)
+        except ValueError as exc:
+            print(exc)
+            return
+        submit_exam(user_token, exam_id, exam_set_index, exam_sets)
     else:
         print("输入无效。")
 
