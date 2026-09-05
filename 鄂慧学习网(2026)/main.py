@@ -24,7 +24,7 @@ study_interval_seconds = 1
 # 考试参数
 right_count = 35
 error_count = 15
-auto_submit_wait_seconds = 10 * 60
+exam_retry_wait_seconds = 10 * 60
 
 
 def load_config() -> dict:
@@ -223,11 +223,14 @@ def build_exam_content_answer(
 def print_exam_result(resp: requests.Response) -> None:
     """格式化打印考试结果，有证书链接时单独展示。"""
     print(f"[考试] 状态码={resp.status_code}")
+    print(f"[考试] 完整返回={resp.text}")
 
     try:
         body = resp.json()
     except Exception:
-        print(f"[考试] 返回={resp.text}")
+        return
+
+    if not isinstance(body, dict):
         return
 
     code = body.get("code")
@@ -290,23 +293,18 @@ def submit_exam_once(
     )
 
 
-def choose_next_set_after_400(
-    last_set_index: int, exam_sets: dict[int, tuple[int, int, int]]
-) -> int:
-    """处理 400 后的用户输入：0=重试上次套题，1+ 切换对应套题。"""
-    while True:
-        raw = input("返回 400：输入 0 重发上次套题，输入 1+ 使用对应套题：").strip()
-        try:
-            value = int(raw)
-        except ValueError:
-            print("输入无效，请输入数字。")
-            continue
-
-        if value == 0:
-            return last_set_index
-        if value in exam_sets:
-            return value
-        print("套题编号不存在，请重新输入。")
+def has_passed_exam(resp: requests.Response) -> bool:
+    """同时检查 HTTP 状态、业务结果码和通过标记。"""
+    if not 200 <= resp.status_code < 300:
+        return False
+    try:
+        body = resp.json()
+    except ValueError:
+        return False
+    if not isinstance(body, dict) or str(body.get("code")) != "200":
+        return False
+    data = body.get("data")
+    return isinstance(data, dict) and data.get("pass") in (1, "1")
 
 
 def submit_exam(
@@ -315,27 +313,26 @@ def submit_exam(
     exam_set_index: int,
     exam_sets: dict[int, tuple[int, int, int]],
 ) -> None:
-    """考试流程：首次选择套题；若返回 400，则按输入重试或切换套题。"""
+    """立即首次提交；未通过则每十分钟重提，通过后自动结束。"""
     headers = build_common_headers(user_token)
     headers["Accept"] = "application/json"
 
     current_set_index = exam_set_index
-    print(f"已选择试卷 id={exam_id}，将在 10 分钟后自动提交。")
-    time.sleep(auto_submit_wait_seconds)
+    print(f"已选择试卷 id={exam_id}，立即提交。")
 
     while True:
         try:
             resp = submit_exam_once(current_set_index, exam_id, exam_sets, headers)
         except Exception as exc:
             print(f"[考试] 请求异常={exc}")
-            return
+        else:
+            print_exam_result(resp)
+            if has_passed_exam(resp):
+                print("考试已通过，程序结束。")
+                return
 
-        print_exam_result(resp)
-
-        if resp.status_code != 400:
-            return
-
-        current_set_index = choose_next_set_after_400(current_set_index, exam_sets)
+        print("将在 10 分钟后使用当前套题再次提交，按 Ctrl+C 可取消。", flush=True)
+        time.sleep(exam_retry_wait_seconds)
 
 
 def main() -> None:
