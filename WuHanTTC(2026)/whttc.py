@@ -91,7 +91,12 @@ def shuake(x: int, y: int, session: requests.Session) -> None:
             print(f'[{i}] HTTP {resp.status_code} {"播放已完成" if finished else "未完成"}')
         except requests.RequestException as exc:
             print(f'[{i}] 请求出错：{exc}')
-        time.sleep(1)
+        time.sleep(2)  # 间隔时间
+
+
+'''
+在这里修改即可。
+'''
 
 
 def main() -> None:
